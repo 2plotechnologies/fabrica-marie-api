@@ -6,6 +6,7 @@ use App\Models\Abono;
 use App\Models\CuentaPorCobrar;
 use App\Models\MovimientoCaja;
 use Illuminate\Http\Request;
+use App\Services\AbonoService;
 use Illuminate\Support\Facades\DB;
 
 class AbonoController extends Controller
@@ -38,8 +39,6 @@ class AbonoController extends Controller
             return $abono;
         });
     }
-
-    use App\Services\AbonoService;
 
     public function anular($id, AbonoService $service)
     {

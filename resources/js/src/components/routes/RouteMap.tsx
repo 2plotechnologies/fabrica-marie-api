@@ -1,0 +1,1272 @@
+import React, { useEffect, useRef, useState } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { 
+  MapPin, 
+  Route, 
+  Store, 
+  Plus, 
+  Trash2, 
+  Save,
+  Navigation,
+  Key,
+  Pentagon,
+  Pencil
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { Route as RouteType } from '@/types';
+
+interface MapPoint {
+  id: string;
+  lng: number;
+  lat: number;
+  type: 'route-point' | 'client';
+  name?: string;
+}
+
+interface SavedRoute {
+  id: string;
+  name: string;
+  zone: string;
+  description?: string;
+  assignedSellerId?: string;
+  clientCount: number;
+  status: 'ACTIVA' | 'INACTIVA';
+  points: MapPoint[];
+}
+
+interface ZonePolygon {
+  id: string;
+  name: string;
+  color: string;
+  points: { lng: number; lat: number }[];
+}
+
+interface NewClient {
+  name: string;
+  address: string;
+  phone: string;
+  zone: string;
+}
+
+interface RouteMapProps {
+  routes: RouteType[];
+  onRoutesChange: (routes: RouteType[]) => void;
+}
+
+type MapMode = 'view' | 'create-route' | 'create-client' | 'create-zone' | 'edit-routes' | 'edit-zones';
+
+const RouteMap = ({ routes, onRoutesChange }: RouteMapProps) => {
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const map = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const modeRef = useRef<MapMode>('view');
+  
+  const [mapboxToken, setMapboxToken] = useState<string>(() => {
+    return localStorage.getItem('mapbox_token') || '';
+  });
+  const [isTokenSet, setIsTokenSet] = useState(!!localStorage.getItem('mapbox_token'));
+  const [isMapLoaded, setIsMapLoaded] = useState(false);
+  const [mode, setMode] = useState<MapMode>('view');
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [showEditRouteDialog, setShowEditRouteDialog] = useState(false);
+  const [showEditZoneDialog, setShowEditZoneDialog] = useState(false);
+  const [editRouteName, setEditRouteName] = useState('');
+  const [editRouteZone, setEditRouteZone] = useState('Norte');
+  const [editZoneName, setEditZoneName] = useState('');
+  const [editZoneColor, setEditZoneColor] = useState('#d97706');
+  
+  // Convert routes from props to map routes with points
+  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>(() => {
+    // Generate mock points for each route based on zone
+    const zoneOffsets: Record<string, { lng: number; lat: number }> = {
+      'Norte': { lng: 0, lat: 0.02 },
+      'Sur': { lng: 0, lat: -0.02 },
+      'Centro': { lng: 0, lat: 0 },
+      'Este': { lng: 0.02, lat: 0 },
+      'Oeste': { lng: -0.02, lat: 0 },
+    };
+
+    return routes.map(route => {
+      const offset = zoneOffsets[route.zone] || { lng: 0, lat: 0 };
+      const baseLng = -75.2048 + offset.lng;
+      const baseLat = -12.0651 + offset.lat;
+      
+      return {
+        id: route.id,
+        name: route.name,
+        zone: route.zone,
+        description: route.description,
+        assignedSellerId: route.assignedSellerId,
+        clientCount: route.clientCount,
+        status: route.status,
+        points: [
+          { id: `${route.id}-p1`, lng: baseLng - 0.01, lat: baseLat - 0.005, type: 'route-point' as const },
+          { id: `${route.id}-p2`, lng: baseLng, lat: baseLat + 0.005, type: 'route-point' as const },
+          { id: `${route.id}-p3`, lng: baseLng + 0.01, lat: baseLat - 0.003, type: 'route-point' as const },
+        ]
+      };
+    });
+  });
+
+  // Initialize zones from unique zones in routes
+  const [zones, setZones] = useState<ZonePolygon[]>(() => {
+    const zoneColors: Record<string, string> = {
+      'Norte': '#2563eb',
+      'Sur': '#16a34a',
+      'Centro': '#d97706',
+      'Este': '#9333ea',
+      'Oeste': '#db2777',
+    };
+
+    const zoneOffsets: Record<string, { lng: number; lat: number }> = {
+      'Norte': { lng: 0, lat: 0.02 },
+      'Sur': { lng: 0, lat: -0.02 },
+      'Centro': { lng: 0, lat: 0 },
+      'Este': { lng: 0.02, lat: 0 },
+      'Oeste': { lng: -0.02, lat: 0 },
+    };
+
+    // Get unique zones
+    const uniqueZones = [...new Set(routes.map(r => r.zone))];
+    
+    return uniqueZones.map(zoneName => {
+      const offset = zoneOffsets[zoneName] || { lng: 0, lat: 0 };
+      const baseLng = -75.2048 + offset.lng;
+      const baseLat = -12.0651 + offset.lat;
+      const size = 0.015;
+      
+      return {
+        id: `zone-${zoneName.toLowerCase()}`,
+        name: `Zona ${zoneName}`,
+        color: zoneColors[zoneName] || '#d97706',
+        points: [
+          { lng: baseLng - size, lat: baseLat - size },
+          { lng: baseLng + size, lat: baseLat - size },
+          { lng: baseLng + size, lat: baseLat + size },
+          { lng: baseLng - size, lat: baseLat + size },
+        ]
+      };
+    });
+  });
+
+  const [routePoints, setRoutePoints] = useState<MapPoint[]>([]);
+  const [clients, setClients] = useState<MapPoint[]>([]);
+  const [zonePoints, setZonePoints] = useState<{ lng: number; lat: number }[]>([]);
+  const [showClientDialog, setShowClientDialog] = useState(false);
+  const [showRouteDialog, setShowRouteDialog] = useState(false);
+  const [showZoneDialog, setShowZoneDialog] = useState(false);
+  const [pendingClientLocation, setPendingClientLocation] = useState<{ lng: number; lat: number } | null>(null);
+  const [newClient, setNewClient] = useState<NewClient>({
+    name: '',
+    address: '',
+    phone: '',
+    zone: 'Norte'
+  });
+  const [routeName, setRouteName] = useState('');
+  const [routeZone, setRouteZone] = useState('Norte');
+  const [zoneName, setZoneName] = useState('');
+  const [zoneColor, setZoneColor] = useState('#d97706');
+
+  const zoneColors = [
+    { name: 'Ámbar', value: '#d97706' },
+    { name: 'Azul', value: '#2563eb' },
+    { name: 'Verde', value: '#16a34a' },
+    { name: 'Rojo', value: '#dc2626' },
+    { name: 'Morado', value: '#9333ea' },
+    { name: 'Rosa', value: '#db2777' },
+  ];
+
+  // Keep modeRef in sync with mode state
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  const saveToken = () => {
+    if (mapboxToken.trim()) {
+      localStorage.setItem('mapbox_token', mapboxToken.trim());
+      setIsTokenSet(true);
+      toast.success('Token de Mapbox guardado correctamente');
+    }
+  };
+
+  useEffect(() => {
+    if (!mapContainer.current || !isTokenSet || !mapboxToken) return;
+
+    // Set token before creating map
+    mapboxgl.accessToken = mapboxToken;
+
+    try {
+      map.current = new mapboxgl.Map({
+        container: mapContainer.current,
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [-75.2048, -12.0651], // Huancayo, Peru
+        zoom: 13,
+      });
+
+      map.current.on('error', (e) => {
+        console.error('Mapbox error:', e);
+        const error = e.error as { status?: number } | undefined;
+        if (error?.status === 401) {
+          toast.error('Token de Mapbox inválido o expirado. Por favor genera uno nuevo.');
+          localStorage.removeItem('mapbox_token');
+          setIsTokenSet(false);
+          setMapboxToken('');
+        }
+      });
+
+      map.current.on('load', () => {
+        // Add controls after map loads
+        map.current?.addControl(
+          new mapboxgl.NavigationControl({
+            visualizePitch: true,
+          }),
+          'top-right'
+        );
+
+        map.current?.addControl(
+          new mapboxgl.GeolocateControl({
+            positionOptions: {
+              enableHighAccuracy: true
+            },
+            trackUserLocation: true,
+            showUserHeading: true
+          }),
+          'top-right'
+        );
+
+        // Add mock existing clients near Huancayo
+        const mockClients: MapPoint[] = [
+          { id: 'c1', lng: -75.2100, lat: -12.0600, type: 'client', name: 'Tienda Dulce Sabor' },
+          { id: 'c2', lng: -75.2000, lat: -12.0700, type: 'client', name: 'Minimarket El Sol' },
+          { id: 'c3', lng: -75.1950, lat: -12.0550, type: 'client', name: 'Bodega La Esquina' },
+        ];
+        setClients(mockClients);
+        
+        // Mark map as fully loaded for style operations
+        setIsMapLoaded(true);
+      });
+
+      map.current.on('click', handleMapClick);
+    } catch (error) {
+      console.error('Error initializing map:', error);
+      toast.error('Error al cargar el mapa. Verifica tu token de Mapbox.');
+    }
+
+    return () => {
+      setIsMapLoaded(false);
+      map.current?.remove();
+    };
+  }, [isTokenSet, mapboxToken]);
+
+  // Update markers when points change
+  useEffect(() => {
+    if (!map.current || !isMapLoaded) return;
+
+    // Clear existing markers
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current = [];
+
+    // Add client markers
+    clients.forEach(client => {
+      const el = document.createElement('div');
+      el.className = 'client-marker';
+      el.innerHTML = `
+        <div class="w-8 h-8 bg-amber-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/>
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+            <path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/>
+            <path d="M2 7h20"/>
+            <path d="M22 7v3a2 2 0 0 1-2 2v0a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12v0a2 2 0 0 1-2-2V7"/>
+          </svg>
+        </div>
+      `;
+      
+      const marker = new mapboxgl.Marker(el)
+        .setLngLat([client.lng, client.lat])
+        .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(`
+          <div class="p-2">
+            <h3 class="font-semibold">${client.name}</h3>
+            <p class="text-sm text-gray-500">Cliente</p>
+          </div>
+        `))
+        .addTo(map.current!);
+      
+      markersRef.current.push(marker);
+    });
+
+    // Add route point markers
+    routePoints.forEach((point, index) => {
+      const el = document.createElement('div');
+      el.className = 'route-marker';
+      el.innerHTML = `
+        <div class="w-8 h-8 bg-primary rounded-full flex items-center justify-center shadow-lg border-2 border-white text-white font-bold text-sm">
+          ${index + 1}
+        </div>
+      `;
+      
+      const marker = new mapboxgl.Marker(el)
+        .setLngLat([point.lng, point.lat])
+        .addTo(map.current!);
+      
+      markersRef.current.push(marker);
+    });
+
+    // Draw route line if we have multiple points
+    if (routePoints.length >= 2) {
+      const sourceId = 'route-line';
+      
+      if (map.current.getSource(sourceId)) {
+        (map.current.getSource(sourceId) as mapboxgl.GeoJSONSource).setData({
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: routePoints.map(p => [p.lng, p.lat])
+          }
+        });
+      } else {
+        map.current.addSource(sourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: routePoints.map(p => [p.lng, p.lat])
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: 'route-line-layer',
+          type: 'line',
+          source: sourceId,
+          layout: {
+            'line-join': 'round',
+            'line-cap': 'round'
+          },
+          paint: {
+            'line-color': '#d97706',
+            'line-width': 4,
+            'line-dasharray': [2, 1]
+          }
+        });
+      }
+    }
+  }, [clients, routePoints, isMapLoaded]);
+
+  // Draw zone polygons
+  useEffect(() => {
+    if (!map.current || !isMapLoaded) return;
+
+    // Draw temporary zone polygon being created
+    const tempZoneId = 'temp-zone';
+    if (zonePoints.length >= 2) {
+      const coordinates = [...zonePoints.map(p => [p.lng, p.lat])];
+      // Close the polygon for display
+      if (zonePoints.length >= 3) {
+        coordinates.push(coordinates[0]);
+      }
+
+      const geometry = zonePoints.length >= 3 
+        ? { type: 'Polygon' as const, coordinates: [coordinates] }
+        : { type: 'LineString' as const, coordinates: coordinates };
+
+      if (map.current.getSource(tempZoneId)) {
+        (map.current.getSource(tempZoneId) as mapboxgl.GeoJSONSource).setData({
+          type: 'Feature',
+          properties: {},
+          geometry
+        });
+      } else {
+        map.current.addSource(tempZoneId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry
+          }
+        });
+
+        map.current.addLayer({
+          id: 'temp-zone-fill',
+          type: 'fill',
+          source: tempZoneId,
+          paint: {
+            'fill-color': zoneColor,
+            'fill-opacity': 0.3
+          }
+        });
+
+        map.current.addLayer({
+          id: 'temp-zone-line',
+          type: 'line',
+          source: tempZoneId,
+          paint: {
+            'line-color': zoneColor,
+            'line-width': 2
+          }
+        });
+      }
+    } else {
+      // Remove temp zone if no points
+      if (map.current.getLayer('temp-zone-fill')) {
+        map.current.removeLayer('temp-zone-fill');
+      }
+      if (map.current.getLayer('temp-zone-line')) {
+        map.current.removeLayer('temp-zone-line');
+      }
+      if (map.current.getSource(tempZoneId)) {
+        map.current.removeSource(tempZoneId);
+      }
+    }
+
+    // Draw saved zones
+    zones.forEach(zone => {
+      const sourceId = `zone-${zone.id}`;
+      const coordinates = [...zone.points.map(p => [p.lng, p.lat]), [zone.points[0].lng, zone.points[0].lat]];
+
+      if (!map.current!.getSource(sourceId)) {
+        map.current!.addSource(sourceId, {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: { name: zone.name },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [coordinates]
+            }
+          }
+        });
+
+        map.current!.addLayer({
+          id: `${sourceId}-fill`,
+          type: 'fill',
+          source: sourceId,
+          paint: {
+            'fill-color': zone.color,
+            'fill-opacity': 0.25
+          }
+        });
+
+        map.current!.addLayer({
+          id: `${sourceId}-line`,
+          type: 'line',
+          source: sourceId,
+          paint: {
+            'line-color': zone.color,
+            'line-width': 2
+          }
+        });
+      }
+    });
+  }, [zonePoints, zones, zoneColor, isMapLoaded]);
+
+  const handleMapClick = (e: mapboxgl.MapMouseEvent) => {
+    const currentMode = modeRef.current;
+    if (currentMode === 'create-route') {
+      const newPoint: MapPoint = {
+        id: `rp-${Date.now()}`,
+        lng: e.lngLat.lng,
+        lat: e.lngLat.lat,
+        type: 'route-point'
+      };
+      setRoutePoints(prev => {
+        toast.success(`Punto ${prev.length + 1} agregado a la ruta`);
+        return [...prev, newPoint];
+      });
+    } else if (currentMode === 'create-client') {
+      setPendingClientLocation({ lng: e.lngLat.lng, lat: e.lngLat.lat });
+      setShowClientDialog(true);
+    } else if (currentMode === 'create-zone') {
+      setZonePoints(prev => {
+        toast.success(`Vértice ${prev.length + 1} agregado a la zona`);
+        return [...prev, { lng: e.lngLat.lng, lat: e.lngLat.lat }];
+      });
+    }
+  };
+
+  const handleSaveClient = () => {
+    if (!pendingClientLocation || !newClient.name) {
+      toast.error('Por favor completa los campos requeridos');
+      return;
+    }
+
+    const newClientPoint: MapPoint = {
+      id: `client-${Date.now()}`,
+      lng: pendingClientLocation.lng,
+      lat: pendingClientLocation.lat,
+      type: 'client',
+      name: newClient.name
+    };
+
+    setClients(prev => [...prev, newClientPoint]);
+    setShowClientDialog(false);
+    setPendingClientLocation(null);
+    setNewClient({ name: '', address: '', phone: '', zone: 'Norte' });
+    setMode('view');
+    toast.success(`Cliente "${newClient.name}" creado exitosamente`);
+  };
+
+  const handleSaveRoute = () => {
+    if (routePoints.length < 2) {
+      toast.error('La ruta debe tener al menos 2 puntos');
+      return;
+    }
+    if (!routeName) {
+      toast.error('Por favor ingresa un nombre para la ruta');
+      return;
+    }
+
+    // Here you would save the route to the database
+    toast.success(`Ruta "${routeName}" guardada con ${routePoints.length} puntos`);
+    setShowRouteDialog(false);
+    setRoutePoints([]);
+    setRouteName('');
+    setMode('view');
+    
+    // Clear the route line from map
+    if (map.current?.getLayer('route-line-layer')) {
+      map.current.removeLayer('route-line-layer');
+      map.current.removeSource('route-line');
+    }
+  };
+
+  const clearRoute = () => {
+    setRoutePoints([]);
+    if (map.current?.getLayer('route-line-layer')) {
+      map.current.removeLayer('route-line-layer');
+      map.current.removeSource('route-line');
+    }
+    toast.info('Ruta limpiada');
+  };
+
+  const handleSaveZone = () => {
+    if (zonePoints.length < 3) {
+      toast.error('La zona debe tener al menos 3 vértices');
+      return;
+    }
+    if (!zoneName) {
+      toast.error('Por favor ingresa un nombre para la zona');
+      return;
+    }
+
+    const newZone: ZonePolygon = {
+      id: `zone-${Date.now()}`,
+      name: zoneName,
+      color: zoneColor,
+      points: [...zonePoints]
+    };
+
+    setZones(prev => [...prev, newZone]);
+    toast.success(`Zona "${zoneName}" guardada con ${zonePoints.length} vértices`);
+    
+    // Clear temp zone from map
+    clearZone();
+    setShowZoneDialog(false);
+    setZoneName('');
+    setMode('view');
+  };
+
+  const clearZone = () => {
+    setZonePoints([]);
+    if (map.current?.getLayer('temp-zone-fill')) {
+      map.current.removeLayer('temp-zone-fill');
+    }
+    if (map.current?.getLayer('temp-zone-line')) {
+      map.current.removeLayer('temp-zone-line');
+    }
+    if (map.current?.getSource('temp-zone')) {
+      map.current.removeSource('temp-zone');
+    }
+    toast.info('Zona limpiada');
+  };
+
+  const handleSelectRouteForEdit = (routeId: string) => {
+    const route = savedRoutes.find(r => r.id === routeId);
+    if (route) {
+      setSelectedRouteId(routeId);
+      setEditRouteName(route.name);
+      setEditRouteZone(route.zone);
+      setShowEditRouteDialog(true);
+    }
+  };
+
+  const handleSelectZoneForEdit = (zoneId: string) => {
+    const zone = zones.find(z => z.id === zoneId);
+    if (zone) {
+      setSelectedZoneId(zoneId);
+      setEditZoneName(zone.name);
+      setEditZoneColor(zone.color);
+      setShowEditZoneDialog(true);
+    }
+  };
+
+  const handleUpdateRoute = () => {
+    if (!selectedRouteId || !editRouteName) {
+      toast.error('Por favor ingresa un nombre para la ruta');
+      return;
+    }
+    
+    // Update savedRoutes local state
+    setSavedRoutes(prev => prev.map(r => 
+      r.id === selectedRouteId 
+        ? { ...r, name: editRouteName, zone: editRouteZone }
+        : r
+    ));
+    
+    // Update parent routes
+    const updatedRoutes = routes.map(r => 
+      r.id === selectedRouteId 
+        ? { ...r, name: editRouteName, zone: editRouteZone }
+        : r
+    );
+    onRoutesChange(updatedRoutes);
+    
+    toast.success(`Ruta "${editRouteName}" actualizada`);
+    setShowEditRouteDialog(false);
+    setSelectedRouteId(null);
+  };
+
+  const handleDeleteRoute = () => {
+    if (!selectedRouteId) return;
+    const route = savedRoutes.find(r => r.id === selectedRouteId);
+    
+    // Update local state
+    setSavedRoutes(prev => prev.filter(r => r.id !== selectedRouteId));
+    
+    // Update parent routes
+    const updatedRoutes = routes.filter(r => r.id !== selectedRouteId);
+    onRoutesChange(updatedRoutes);
+    
+    toast.success(`Ruta "${route?.name}" eliminada`);
+    setShowEditRouteDialog(false);
+    setSelectedRouteId(null);
+  };
+
+  const handleUpdateZone = () => {
+    if (!selectedZoneId || !editZoneName) {
+      toast.error('Por favor ingresa un nombre para la zona');
+      return;
+    }
+    
+    // Update zone in state
+    setZones(prev => prev.map(z => 
+      z.id === selectedZoneId 
+        ? { ...z, name: editZoneName, color: editZoneColor }
+        : z
+    ));
+
+    // Update zone on map
+    if (map.current) {
+      const sourceId = `zone-${selectedZoneId}`;
+      if (map.current.getLayer(`${sourceId}-fill`)) {
+        map.current.setPaintProperty(`${sourceId}-fill`, 'fill-color', editZoneColor);
+      }
+      if (map.current.getLayer(`${sourceId}-line`)) {
+        map.current.setPaintProperty(`${sourceId}-line`, 'line-color', editZoneColor);
+      }
+    }
+
+    toast.success(`Zona "${editZoneName}" actualizada`);
+    setShowEditZoneDialog(false);
+    setSelectedZoneId(null);
+  };
+
+  const handleDeleteZone = () => {
+    if (!selectedZoneId) return;
+    const zone = zones.find(z => z.id === selectedZoneId);
+    
+    // Remove from map
+    if (map.current) {
+      const sourceId = `zone-${selectedZoneId}`;
+      if (map.current.getLayer(`${sourceId}-fill`)) {
+        map.current.removeLayer(`${sourceId}-fill`);
+      }
+      if (map.current.getLayer(`${sourceId}-line`)) {
+        map.current.removeLayer(`${sourceId}-line`);
+      }
+      if (map.current.getSource(sourceId)) {
+        map.current.removeSource(sourceId);
+      }
+    }
+
+    setZones(prev => prev.filter(z => z.id !== selectedZoneId));
+    toast.success(`Zona "${zone?.name}" eliminada`);
+    setShowEditZoneDialog(false);
+    setSelectedZoneId(null);
+  };
+
+  if (!isTokenSet) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[600px] bg-card rounded-xl border p-8">
+        <div className="max-w-md w-full space-y-6 text-center">
+          <div className="h-16 w-16 mx-auto rounded-full bg-primary/10 flex items-center justify-center">
+            <Key className="h-8 w-8 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-xl font-display font-semibold mb-2">Configurar Mapbox</h3>
+            <p className="text-muted-foreground text-sm">
+              Para usar el mapa interactivo, necesitas un token de Mapbox. 
+              Puedes obtenerlo gratis en{' '}
+              <a 
+                href="https://mapbox.com/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                mapbox.com
+              </a>
+            </p>
+          </div>
+          <div className="space-y-3">
+            <Input
+              placeholder="pk.eyJ1Ijoi..."
+              value={mapboxToken}
+              onChange={(e) => setMapboxToken(e.target.value)}
+              className="font-mono text-sm"
+            />
+            <Button onClick={saveToken} className="w-full" variant="gradient">
+              <Key className="h-4 w-4 mr-2" />
+              Guardar Token
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3 p-4 bg-card rounded-xl border">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-muted-foreground">Modo:</span>
+          <Badge 
+            variant={mode === 'view' ? 'default' : 'outline'}
+            className={cn(
+              "cursor-pointer transition-colors",
+              mode === 'view' && 'bg-primary'
+            )}
+            onClick={() => setMode('view')}
+          >
+            <Navigation className="h-3 w-3 mr-1" />
+            Ver
+          </Badge>
+          <Badge 
+            variant={mode === 'create-route' ? 'default' : 'outline'}
+            className={cn(
+              "cursor-pointer transition-colors",
+              mode === 'create-route' && 'bg-amber-500'
+            )}
+            onClick={() => setMode('create-route')}
+          >
+            <Route className="h-3 w-3 mr-1" />
+            Crear Ruta
+          </Badge>
+          <Badge 
+            variant={mode === 'create-client' ? 'default' : 'outline'}
+            className={cn(
+              "cursor-pointer transition-colors",
+              mode === 'create-client' && 'bg-success'
+            )}
+            onClick={() => setMode('create-client')}
+          >
+            <Store className="h-3 w-3 mr-1" />
+            Crear Cliente
+          </Badge>
+          <Badge 
+            variant={mode === 'create-zone' ? 'default' : 'outline'}
+            className={cn(
+              "cursor-pointer transition-colors",
+              mode === 'create-zone' && 'bg-purple-500'
+            )}
+            onClick={() => setMode('create-zone')}
+          >
+            <Pentagon className="h-3 w-3 mr-1" />
+            Crear Zona
+          </Badge>
+          <Badge 
+            variant={mode === 'edit-routes' ? 'default' : 'outline'}
+            className={cn(
+              "cursor-pointer transition-colors",
+              mode === 'edit-routes' && 'bg-blue-500'
+            )}
+            onClick={() => setMode('edit-routes')}
+          >
+            <Pencil className="h-3 w-3 mr-1" />
+            Editar Rutas
+          </Badge>
+          <Badge 
+            variant={mode === 'edit-zones' ? 'default' : 'outline'}
+            className={cn(
+              "cursor-pointer transition-colors",
+              mode === 'edit-zones' && 'bg-pink-500'
+            )}
+            onClick={() => setMode('edit-zones')}
+          >
+            <Pencil className="h-3 w-3 mr-1" />
+            Editar Zonas
+          </Badge>
+        </div>
+
+        <div className="flex-1" />
+
+        {mode === 'create-route' && routePoints.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">
+              {routePoints.length} punto(s)
+            </span>
+            <Button variant="outline" size="sm" onClick={clearRoute}>
+              <Trash2 className="h-4 w-4 mr-1" />
+              Limpiar
+            </Button>
+            <Button 
+              size="sm" 
+              variant="gradient"
+              onClick={() => setShowRouteDialog(true)}
+              disabled={routePoints.length < 2}
+            >
+              <Save className="h-4 w-4 mr-1" />
+              Guardar Ruta
+            </Button>
+          </div>
+        )}
+
+        {mode === 'create-zone' && zonePoints.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">
+              {zonePoints.length} vértice(s)
+            </span>
+            <Button variant="outline" size="sm" onClick={clearZone}>
+              <Trash2 className="h-4 w-4 mr-1" />
+              Limpiar
+            </Button>
+            <Button 
+              size="sm" 
+              variant="gradient"
+              onClick={() => setShowZoneDialog(true)}
+              disabled={zonePoints.length < 3}
+            >
+              <Save className="h-4 w-4 mr-1" />
+              Guardar Zona
+            </Button>
+          </div>
+        )}
+
+        {mode === 'create-client' && (
+          <p className="text-sm text-muted-foreground">
+            Haz clic en el mapa para ubicar el nuevo cliente
+          </p>
+        )}
+
+        {mode === 'create-zone' && zonePoints.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            Haz clic en el mapa para dibujar los vértices de la zona (mínimo 3)
+          </p>
+        )}
+
+        {mode === 'edit-routes' && (
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-muted-foreground">
+              Selecciona una ruta para editar:
+            </p>
+            {savedRoutes.length > 0 ? (
+              <div className="flex gap-2 flex-wrap">
+                {savedRoutes.map(route => (
+                  <Badge
+                    key={route.id}
+                    variant="outline"
+                    className="cursor-pointer hover:bg-blue-500/20"
+                    onClick={() => handleSelectRouteForEdit(route.id)}
+                  >
+                    <Route className="h-3 w-3 mr-1" />
+                    {route.name}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <span className="text-sm text-muted-foreground italic">No hay rutas guardadas</span>
+            )}
+          </div>
+        )}
+
+        {mode === 'edit-zones' && (
+          <div className="flex items-center gap-2">
+            <p className="text-sm text-muted-foreground">
+              Selecciona una zona para editar:
+            </p>
+            {zones.length > 0 ? (
+              <div className="flex gap-2 flex-wrap">
+                {zones.map(zone => (
+                  <Badge
+                    key={zone.id}
+                    variant="outline"
+                    className="cursor-pointer hover:bg-pink-500/20"
+                    style={{ borderColor: zone.color }}
+                    onClick={() => handleSelectZoneForEdit(zone.id)}
+                  >
+                    <Pentagon className="h-3 w-3 mr-1" style={{ color: zone.color }} />
+                    {zone.name}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <span className="text-sm text-muted-foreground italic">No hay zonas guardadas</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Map Container */}
+      <div className="relative w-full h-[600px] rounded-xl overflow-hidden border shadow-card">
+        <div ref={mapContainer} className="absolute inset-0 w-full h-full" style={{ minHeight: '600px' }} />
+        
+        {/* Legend */}
+        <div className="absolute bottom-4 left-4 bg-card/95 backdrop-blur-sm rounded-lg border p-3 shadow-lg">
+          <p className="text-xs font-medium mb-2">Leyenda</p>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-amber-500 rounded-full" />
+              <span className="text-xs">Clientes/Tiendas</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-primary rounded-full flex items-center justify-center text-white text-[8px] font-bold">1</div>
+              <span className="text-xs">Puntos de ruta</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-0.5 bg-amber-500 border-dashed border-t-2 border-amber-500" />
+              <span className="text-xs">Trayecto</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-purple-500/30 border border-purple-500 rounded-sm" />
+              <span className="text-xs">Zonas</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Save Route Dialog */}
+      <Dialog open={showRouteDialog} onOpenChange={setShowRouteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Route className="h-5 w-5 text-primary" />
+              Guardar Nueva Ruta
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="route-name">Nombre de la Ruta</Label>
+              <Input
+                id="route-name"
+                placeholder="Ej: Ruta Norte - Mañana"
+                value={routeName}
+                onChange={(e) => setRouteName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="route-zone">Zona</Label>
+              <Select value={routeZone} onValueChange={setRouteZone}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Norte">Norte</SelectItem>
+                  <SelectItem value="Sur">Sur</SelectItem>
+                  <SelectItem value="Centro">Centro</SelectItem>
+                  <SelectItem value="Este">Este</SelectItem>
+                  <SelectItem value="Oeste">Oeste</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="p-3 bg-secondary/50 rounded-lg">
+              <p className="text-sm text-muted-foreground">
+                Esta ruta tiene <strong>{routePoints.length} puntos</strong> definidos.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowRouteDialog(false)}>
+              Cancelar
+            </Button>
+            <Button variant="gradient" onClick={handleSaveRoute}>
+              <Save className="h-4 w-4 mr-2" />
+              Guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Client Dialog */}
+      <Dialog open={showClientDialog} onOpenChange={setShowClientDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Store className="h-5 w-5 text-success" />
+              Nuevo Cliente / Tienda
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="client-name">Nombre del Cliente *</Label>
+              <Input
+                id="client-name"
+                placeholder="Ej: Bodega El Sol"
+                value={newClient.name}
+                onChange={(e) => setNewClient({ ...newClient, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="client-address">Dirección</Label>
+              <Input
+                id="client-address"
+                placeholder="Ej: Av. Principal 123"
+                value={newClient.address}
+                onChange={(e) => setNewClient({ ...newClient, address: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="client-phone">Teléfono</Label>
+              <Input
+                id="client-phone"
+                placeholder="Ej: 999 888 777"
+                value={newClient.phone}
+                onChange={(e) => setNewClient({ ...newClient, phone: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="client-zone">Zona</Label>
+              <Select 
+                value={newClient.zone} 
+                onValueChange={(value) => setNewClient({ ...newClient, zone: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Norte">Norte</SelectItem>
+                  <SelectItem value="Sur">Sur</SelectItem>
+                  <SelectItem value="Centro">Centro</SelectItem>
+                  <SelectItem value="Este">Este</SelectItem>
+                  <SelectItem value="Oeste">Oeste</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {pendingClientLocation && (
+              <div className="p-3 bg-secondary/50 rounded-lg">
+                <p className="text-xs text-muted-foreground">
+                  Ubicación: {pendingClientLocation.lat.toFixed(6)}, {pendingClientLocation.lng.toFixed(6)}
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setShowClientDialog(false);
+              setPendingClientLocation(null);
+            }}>
+              Cancelar
+            </Button>
+            <Button variant="gradient" onClick={handleSaveClient}>
+              <Plus className="h-4 w-4 mr-2" />
+              Crear Cliente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Zone Dialog */}
+      <Dialog open={showZoneDialog} onOpenChange={setShowZoneDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pentagon className="h-5 w-5 text-purple-500" />
+              Guardar Nueva Zona
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="zone-name">Nombre de la Zona</Label>
+              <Input
+                id="zone-name"
+                placeholder="Ej: Zona Norte Industrial"
+                value={zoneName}
+                onChange={(e) => setZoneName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Color de la Zona</Label>
+              <div className="flex gap-2 flex-wrap">
+                {zoneColors.map((color) => (
+                  <button
+                    key={color.value}
+                    type="button"
+                    className={cn(
+                      "w-8 h-8 rounded-full border-2 transition-all",
+                      zoneColor === color.value 
+                        ? "border-foreground scale-110" 
+                        : "border-transparent hover:scale-105"
+                    )}
+                    style={{ backgroundColor: color.value }}
+                    onClick={() => setZoneColor(color.value)}
+                    title={color.name}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="p-3 bg-secondary/50 rounded-lg">
+              <p className="text-sm text-muted-foreground">
+                Esta zona tiene <strong>{zonePoints.length} vértices</strong> definidos.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowZoneDialog(false)}>
+              Cancelar
+            </Button>
+            <Button variant="gradient" onClick={handleSaveZone}>
+              <Save className="h-4 w-4 mr-2" />
+              Guardar Zona
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Route Dialog */}
+      <Dialog open={showEditRouteDialog} onOpenChange={setShowEditRouteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-blue-500" />
+              Editar Ruta
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-route-name">Nombre de la Ruta</Label>
+              <Input
+                id="edit-route-name"
+                placeholder="Ej: Ruta Norte - Mañana"
+                value={editRouteName}
+                onChange={(e) => setEditRouteName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-route-zone">Zona</Label>
+              <Select value={editRouteZone} onValueChange={setEditRouteZone}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Norte">Norte</SelectItem>
+                  <SelectItem value="Sur">Sur</SelectItem>
+                  <SelectItem value="Centro">Centro</SelectItem>
+                  <SelectItem value="Este">Este</SelectItem>
+                  <SelectItem value="Oeste">Oeste</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter className="flex justify-between">
+            <Button variant="destructive" onClick={handleDeleteRoute}>
+              <Trash2 className="h-4 w-4 mr-2" />
+              Eliminar
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowEditRouteDialog(false)}>
+                Cancelar
+              </Button>
+              <Button variant="gradient" onClick={handleUpdateRoute}>
+                <Save className="h-4 w-4 mr-2" />
+                Guardar
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Zone Dialog */}
+      <Dialog open={showEditZoneDialog} onOpenChange={setShowEditZoneDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-pink-500" />
+              Editar Zona
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-zone-name">Nombre de la Zona</Label>
+              <Input
+                id="edit-zone-name"
+                placeholder="Ej: Zona Norte Industrial"
+                value={editZoneName}
+                onChange={(e) => setEditZoneName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Color de la Zona</Label>
+              <div className="flex gap-2 flex-wrap">
+                {zoneColors.map((color) => (
+                  <button
+                    key={color.value}
+                    type="button"
+                    className={cn(
+                      "w-8 h-8 rounded-full border-2 transition-all",
+                      editZoneColor === color.value 
+                        ? "border-foreground scale-110" 
+                        : "border-transparent hover:scale-105"
+                    )}
+                    style={{ backgroundColor: color.value }}
+                    onClick={() => setEditZoneColor(color.value)}
+                    title={color.name}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex justify-between">
+            <Button variant="destructive" onClick={handleDeleteZone}>
+              <Trash2 className="h-4 w-4 mr-2" />
+              Eliminar
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowEditZoneDialog(false)}>
+                Cancelar
+              </Button>
+              <Button variant="gradient" onClick={handleUpdateZone}>
+                <Save className="h-4 w-4 mr-2" />
+                Guardar
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default RouteMap;

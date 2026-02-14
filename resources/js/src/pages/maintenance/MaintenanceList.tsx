@@ -1,0 +1,382 @@
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { 
+  Search, 
+  Wrench, 
+  Plus, 
+  Calendar,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  Truck,
+  DollarSign,
+} from 'lucide-react';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { useToast } from '@/hooks/use-toast';
+
+// Mock maintenance data
+const mockMaintenanceRecords = [
+  { 
+    id: '1', 
+    vehiclePlate: 'ABC-123',
+    vehicleName: 'Toyota Hilux',
+    type: 'PREVENTIVO',
+    description: 'Cambio de aceite y filtros',
+    status: 'COMPLETADO',
+    cost: 350.00,
+    scheduledDate: new Date('2024-12-10'),
+    completedDate: new Date('2024-12-10'),
+    technician: 'Taller Automotriz San Miguel',
+  },
+  { 
+    id: '2', 
+    vehiclePlate: 'XYZ-789',
+    vehicleName: 'Hyundai H100',
+    type: 'CORRECTIVO',
+    description: 'Reparación sistema de frenos',
+    status: 'EN_PROCESO',
+    cost: 850.00,
+    scheduledDate: new Date('2024-12-12'),
+    technician: 'Mecánica Express',
+  },
+  { 
+    id: '3', 
+    vehiclePlate: 'DEF-456',
+    vehicleName: 'Kia K2700',
+    type: 'PREVENTIVO',
+    description: 'Revisión general y afinamiento',
+    status: 'PENDIENTE',
+    cost: 450.00,
+    scheduledDate: new Date('2024-12-20'),
+    technician: 'Taller Automotriz San Miguel',
+  },
+  { 
+    id: '4', 
+    vehiclePlate: 'GHI-321',
+    vehicleName: 'Suzuki Carry',
+    type: 'CORRECTIVO',
+    description: 'Cambio de batería',
+    status: 'COMPLETADO',
+    cost: 280.00,
+    scheduledDate: new Date('2024-12-05'),
+    completedDate: new Date('2024-12-05'),
+    technician: 'Autopartes del Centro',
+  },
+];
+
+const MaintenanceList = () => {
+  const { toast } = useToast();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+
+  const filteredRecords = mockMaintenanceRecords.filter((record) => {
+    const matchesSearch = 
+      record.vehiclePlate.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      record.vehicleName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      record.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || record.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const getStatusBadge = (status: string) => {
+    const variants: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ReactNode; label: string }> = {
+      PENDIENTE: { variant: 'secondary', icon: <Clock className="h-3 w-3 mr-1" />, label: 'Pendiente' },
+      EN_PROCESO: { variant: 'outline', icon: <Wrench className="h-3 w-3 mr-1" />, label: 'En Proceso' },
+      COMPLETADO: { variant: 'default', icon: <CheckCircle className="h-3 w-3 mr-1" />, label: 'Completado' },
+    };
+    const config = variants[status] || { variant: 'outline', icon: null, label: status };
+    return (
+      <Badge variant={config.variant} className="flex items-center">
+        {config.icon}
+        {config.label}
+      </Badge>
+    );
+  };
+
+  const getTypeBadge = (type: string) => {
+    return (
+      <Badge variant={type === 'PREVENTIVO' ? 'secondary' : 'destructive'}>
+        {type === 'PREVENTIVO' ? 'Preventivo' : 'Correctivo'}
+      </Badge>
+    );
+  };
+
+  const handleAddMaintenance = () => {
+    toast({
+      title: "Mantenimiento programado",
+      description: "El mantenimiento ha sido registrado correctamente",
+    });
+    setIsAddDialogOpen(false);
+  };
+
+  const stats = {
+    total: mockMaintenanceRecords.length,
+    pending: mockMaintenanceRecords.filter(m => m.status === 'PENDIENTE').length,
+    inProcess: mockMaintenanceRecords.filter(m => m.status === 'EN_PROCESO').length,
+    totalCost: mockMaintenanceRecords.reduce((acc, m) => acc + m.cost, 0),
+  };
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-display font-bold text-foreground">
+            Mantenimiento de Vehículos
+          </h1>
+          <p className="text-muted-foreground">
+            Control de mantenimientos preventivos y correctivos
+          </p>
+        </div>
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-gradient-warm hover:opacity-90">
+              <Plus className="h-4 w-4 mr-2" />
+              Programar Mantenimiento
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Programar Mantenimiento</DialogTitle>
+              <DialogDescription>
+                Registra un nuevo mantenimiento para un vehículo
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Vehículo</Label>
+                  <Select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ABC-123">ABC-123 - Toyota Hilux</SelectItem>
+                      <SelectItem value="XYZ-789">XYZ-789 - Hyundai H100</SelectItem>
+                      <SelectItem value="DEF-456">DEF-456 - Kia K2700</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Tipo</Label>
+                  <Select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="PREVENTIVO">Preventivo</SelectItem>
+                      <SelectItem value="CORRECTIVO">Correctivo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Descripción</Label>
+                <Textarea placeholder="Detalle del trabajo a realizar..." />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Fecha Programada</Label>
+                  <Input type="date" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Costo Estimado (S/)</Label>
+                  <Input type="number" placeholder="0.00" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Taller / Técnico</Label>
+                <Input placeholder="Nombre del taller o técnico" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button className="bg-gradient-warm hover:opacity-90" onClick={handleAddMaintenance}>
+                Programar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card className="shadow-card">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Wrench className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Total Registros</p>
+                <p className="text-2xl font-bold text-foreground">{stats.total}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+                <Clock className="h-6 w-6 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Pendientes</p>
+                <p className="text-2xl font-bold text-foreground">{stats.pending}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <AlertTriangle className="h-6 w-6 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">En Proceso</p>
+                <p className="text-2xl font-bold text-foreground">{stats.inProcess}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                <DollarSign className="h-6 w-6 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Costo Total</p>
+                <p className="text-2xl font-bold text-foreground">
+                  S/ {stats.totalCost.toLocaleString()}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <Card className="shadow-card">
+        <CardContent className="pt-6">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por placa, vehículo o descripción..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-full sm:w-48">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="PENDIENTE">Pendiente</SelectItem>
+                <SelectItem value="EN_PROCESO">En Proceso</SelectItem>
+                <SelectItem value="COMPLETADO">Completado</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Maintenance Table */}
+      <Card className="shadow-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Calendar className="h-5 w-5 text-primary" />
+            Historial de Mantenimientos
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Vehículo</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>Descripción</TableHead>
+                <TableHead>Fecha</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead className="text-right">Costo</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredRecords.map((record) => (
+                <TableRow key={record.id} className="hover:bg-muted/50">
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Truck className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                          {record.vehiclePlate}
+                        </code>
+                        <p className="text-sm text-muted-foreground">{record.vehicleName}</p>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>{getTypeBadge(record.type)}</TableCell>
+                  <TableCell>
+                    <div>
+                      <p className="font-medium">{record.description}</p>
+                      <p className="text-xs text-muted-foreground">{record.technician}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {format(record.scheduledDate, "dd MMM yyyy", { locale: es })}
+                  </TableCell>
+                  <TableCell>{getStatusBadge(record.status)}</TableCell>
+                  <TableCell className="text-right font-semibold">
+                    S/ {record.cost.toFixed(2)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default MaintenanceList;

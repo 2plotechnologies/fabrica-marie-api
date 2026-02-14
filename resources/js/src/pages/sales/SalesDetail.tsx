@@ -1,0 +1,924 @@
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { CalendarIcon, FileDown, ShoppingCart, Users, Truck, Search, Eye, DollarSign, Package, Gift, MapPin } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+// Tipos basados en el Excel
+interface SaleDetailItem {
+  id: string;
+  presentacion: string;
+  cantidad: number;
+  precio: number;
+  total: number;
+  bonificacion: number;
+  degustacion: number;
+  condicionVenta: 'CONTADO' | 'CREDITO' | 'DEPOSITO';
+  notaPedido: string;
+  tipoCliente: 'DISTRIBUIDOR' | 'MAYORISTA' | 'SUPER_MAYORISTA' | 'TIENDA' | 'MINIMARKET';
+}
+
+interface SaleDetail {
+  id: string;
+  fecha: Date;
+  vehiculoId: string;
+  vehiculoPlaca: string;
+  vendedor: string;
+  cliente: string;
+  clienteId: string;
+  items: SaleDetailItem[];
+  subtotal: number;
+  totalBonificacion: number;
+  totalDegustacion: number;
+  total: number;
+  condicionVenta: 'CONTADO' | 'CREDITO' | 'DEPOSITO';
+  notaPedido: string;
+  tipoCliente: string;
+  createdAt: Date;
+}
+
+// Tipo para promociones/degustaciones detalladas
+interface PromocionDegustacion {
+  id: string;
+  fecha: Date;
+  vendedor: string;
+  vehiculoPlaca: string;
+  cliente: string;
+  clienteId: string;
+  tipoCliente: string;
+  producto: string;
+  tipo: 'PROMOCION' | 'DEGUSTACION';
+  cantidad: number;
+  valorEstimado: number;
+  motivo: string;
+  ruta: string;
+  diaRuta: number; // Día 1, 2, 3... de la ruta (para rutas largas)
+}
+
+// Mock data para promociones/degustaciones
+const mockPromocionesDegustaciones: PromocionDegustacion[] = [
+  {
+    id: '1',
+    fecha: new Date(),
+    vendedor: 'Carlos Ruiz',
+    vehiculoPlaca: 'ABC-123',
+    cliente: 'Distribuidora El Sol',
+    clienteId: '1',
+    tipoCliente: 'DISTRIBUIDOR',
+    producto: 'Galleta Clásica 100g',
+    tipo: 'DEGUSTACION',
+    cantidad: 5,
+    valorEstimado: 12.50,
+    motivo: 'Introducción de producto nuevo',
+    ruta: 'Ruta Norte Lima',
+    diaRuta: 1,
+  },
+  {
+    id: '2',
+    fecha: new Date(),
+    vendedor: 'Carlos Ruiz',
+    vehiculoPlaca: 'ABC-123',
+    cliente: 'Tienda Juanita',
+    clienteId: '4',
+    tipoCliente: 'TIENDA',
+    producto: 'Galleta Chocolate 150g',
+    tipo: 'PROMOCION',
+    cantidad: 3,
+    valorEstimado: 10.50,
+    motivo: 'Promoción 3x2 activa',
+    ruta: 'Ruta Norte Lima',
+    diaRuta: 1,
+  },
+  {
+    id: '3',
+    fecha: new Date(Date.now() - 86400000),
+    vendedor: 'María López',
+    vehiculoPlaca: 'DEF-456',
+    cliente: 'Mayorista Central',
+    clienteId: '2',
+    tipoCliente: 'MAYORISTA',
+    producto: 'Galleta Surtida 250g',
+    tipo: 'DEGUSTACION',
+    cantidad: 10,
+    valorEstimado: 50.00,
+    motivo: 'Cliente nuevo - primera visita',
+    ruta: 'Ruta Sur',
+    diaRuta: 3,
+  },
+  {
+    id: '4',
+    fecha: new Date(Date.now() - 86400000 * 2),
+    vendedor: 'Pedro Sánchez',
+    vehiculoPlaca: 'GHI-789',
+    cliente: 'Super Mayorista Norte',
+    clienteId: '3',
+    tipoCliente: 'SUPER_MAYORISTA',
+    producto: 'Galleta Vainilla 200g',
+    tipo: 'PROMOCION',
+    cantidad: 8,
+    valorEstimado: 32.00,
+    motivo: 'Promoción por volumen',
+    ruta: 'Ruta Este',
+    diaRuta: 5,
+  },
+  {
+    id: '5',
+    fecha: new Date(Date.now() - 86400000 * 3),
+    vendedor: 'María López',
+    vehiculoPlaca: 'DEF-456',
+    cliente: 'Minimarket Express',
+    clienteId: '5',
+    tipoCliente: 'MINIMARKET',
+    producto: 'Galleta Clásica 100g',
+    tipo: 'DEGUSTACION',
+    cantidad: 2,
+    valorEstimado: 5.00,
+    motivo: 'Reactivación de cliente',
+    ruta: 'Ruta Sur',
+    diaRuta: 6,
+  },
+];
+
+// Mock data
+const mockVendedores = [
+  { id: '1', nombre: 'Carlos Ruiz', placa: 'ABC-123' },
+  { id: '2', nombre: 'María López', placa: 'DEF-456' },
+  { id: '3', nombre: 'Pedro Sánchez', placa: 'GHI-789' },
+];
+
+const mockClientes = [
+  { id: '1', nombre: 'Distribuidora El Sol', tipo: 'DISTRIBUIDOR' },
+  { id: '2', nombre: 'Mayorista Central', tipo: 'MAYORISTA' },
+  { id: '3', nombre: 'Super Mayorista Norte', tipo: 'SUPER_MAYORISTA' },
+  { id: '4', nombre: 'Tienda Juanita', tipo: 'TIENDA' },
+  { id: '5', nombre: 'Minimarket Express', tipo: 'MINIMARKET' },
+];
+
+const mockVentas: SaleDetail[] = [
+  {
+    id: '1',
+    fecha: new Date(),
+    vehiculoId: '1',
+    vehiculoPlaca: 'ABC-123',
+    vendedor: 'Carlos Ruiz',
+    cliente: 'Distribuidora El Sol',
+    clienteId: '1',
+    items: [
+      { id: '1', presentacion: 'Galleta Clásica 100g', cantidad: 50, precio: 2.5, total: 125, bonificacion: 5, degustacion: 2, condicionVenta: 'CONTADO', notaPedido: 'NP-001', tipoCliente: 'DISTRIBUIDOR' },
+      { id: '2', presentacion: 'Galleta Chocolate 150g', cantidad: 30, precio: 3.5, total: 105, bonificacion: 3, degustacion: 1, condicionVenta: 'CONTADO', notaPedido: 'NP-001', tipoCliente: 'DISTRIBUIDOR' },
+    ],
+    subtotal: 230,
+    totalBonificacion: 8,
+    totalDegustacion: 3,
+    total: 230,
+    condicionVenta: 'CONTADO',
+    notaPedido: 'NP-001',
+    tipoCliente: 'DISTRIBUIDOR',
+    createdAt: new Date(),
+  },
+  {
+    id: '2',
+    fecha: new Date(),
+    vehiculoId: '1',
+    vehiculoPlaca: 'ABC-123',
+    vendedor: 'Carlos Ruiz',
+    cliente: 'Tienda Juanita',
+    clienteId: '4',
+    items: [
+      { id: '1', presentacion: 'Galleta Vainilla 200g', cantidad: 20, precio: 4.0, total: 80, bonificacion: 2, degustacion: 0, condicionVenta: 'CREDITO', notaPedido: 'NP-002', tipoCliente: 'TIENDA' },
+    ],
+    subtotal: 80,
+    totalBonificacion: 2,
+    totalDegustacion: 0,
+    total: 80,
+    condicionVenta: 'CREDITO',
+    notaPedido: 'NP-002',
+    tipoCliente: 'TIENDA',
+    createdAt: new Date(),
+  },
+  {
+    id: '3',
+    fecha: new Date(Date.now() - 86400000),
+    vehiculoId: '2',
+    vehiculoPlaca: 'DEF-456',
+    vendedor: 'María López',
+    cliente: 'Mayorista Central',
+    clienteId: '2',
+    items: [
+      { id: '1', presentacion: 'Galleta Surtida 250g', cantidad: 100, precio: 5.0, total: 500, bonificacion: 10, degustacion: 5, condicionVenta: 'DEPOSITO', notaPedido: 'NP-003', tipoCliente: 'MAYORISTA' },
+    ],
+    subtotal: 500,
+    totalBonificacion: 10,
+    totalDegustacion: 5,
+    total: 500,
+    condicionVenta: 'DEPOSITO',
+    notaPedido: 'NP-003',
+    tipoCliente: 'MAYORISTA',
+    createdAt: new Date(Date.now() - 86400000),
+  },
+];
+
+const SalesDetailPage = () => {
+  const [ventas] = useState<SaleDetail[]>(mockVentas);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterVendedor, setFilterVendedor] = useState<string>('all');
+  const [filterCliente, setFilterCliente] = useState<string>('all');
+  const [filterCondicion, setFilterCondicion] = useState<string>('all');
+  const [filterTipoCliente, setFilterTipoCliente] = useState<string>('all');
+  const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>({
+    from: startOfWeek(new Date(), { locale: es }),
+    to: endOfWeek(new Date(), { locale: es }),
+  });
+  const [selectedVenta, setSelectedVenta] = useState<SaleDetail | null>(null);
+
+  // Filtrar ventas
+  const filteredVentas = ventas.filter(venta => {
+    const matchesSearch = venta.cliente.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          venta.notaPedido.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesVendedor = filterVendedor === 'all' || venta.vehiculoId === filterVendedor;
+    const matchesCliente = filterCliente === 'all' || venta.clienteId === filterCliente;
+    const matchesCondicion = filterCondicion === 'all' || venta.condicionVenta === filterCondicion;
+    const matchesTipo = filterTipoCliente === 'all' || venta.tipoCliente === filterTipoCliente;
+    const matchesDate = venta.fecha >= dateRange.from && venta.fecha <= dateRange.to;
+    return matchesSearch && matchesVendedor && matchesCliente && matchesCondicion && matchesTipo && matchesDate;
+  });
+
+  // KPIs
+  const totalVentas = filteredVentas.reduce((acc, v) => acc + v.total, 0);
+  const ventasContado = filteredVentas.filter(v => v.condicionVenta === 'CONTADO').reduce((acc, v) => acc + v.total, 0);
+  const ventasCredito = filteredVentas.filter(v => v.condicionVenta === 'CREDITO').reduce((acc, v) => acc + v.total, 0);
+  const ventasDeposito = filteredVentas.filter(v => v.condicionVenta === 'DEPOSITO').reduce((acc, v) => acc + v.total, 0);
+  const totalBonificaciones = filteredVentas.reduce((acc, v) => acc + v.totalBonificacion, 0);
+  const totalDegustaciones = filteredVentas.reduce((acc, v) => acc + v.totalDegustacion, 0);
+  const clientesAtendidos = new Set(filteredVentas.map(v => v.clienteId)).size;
+
+  const getCondicionBadge = (condicion: string) => {
+    switch (condicion) {
+      case 'CONTADO':
+        return <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30">Contado</Badge>;
+      case 'CREDITO':
+        return <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/30">Crédito</Badge>;
+      case 'DEPOSITO':
+        return <Badge className="bg-blue-500/10 text-blue-500 border-blue-500/30">Depósito</Badge>;
+      default:
+        return <Badge variant="outline">{condicion}</Badge>;
+    }
+  };
+
+  const getTipoClienteBadge = (tipo: string) => {
+    const colors: Record<string, string> = {
+      'DISTRIBUIDOR': 'bg-purple-500/10 text-purple-500',
+      'MAYORISTA': 'bg-blue-500/10 text-blue-500',
+      'SUPER_MAYORISTA': 'bg-indigo-500/10 text-indigo-500',
+      'TIENDA': 'bg-emerald-500/10 text-emerald-500',
+      'MINIMARKET': 'bg-amber-500/10 text-amber-500',
+    };
+    const labels: Record<string, string> = {
+      'DISTRIBUIDOR': 'D',
+      'MAYORISTA': 'M',
+      'SUPER_MAYORISTA': 'SM',
+      'TIENDA': 'T',
+      'MINIMARKET': 'CM',
+    };
+    return <Badge className={colors[tipo] || ''}>{labels[tipo] || tipo}</Badge>;
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-display font-bold text-foreground">Detalle de Ventas</h1>
+          <p className="text-muted-foreground">Reporte detallado de ventas por carro-vendedor</p>
+        </div>
+        <Button variant="outline" size="sm">
+          <FileDown className="h-4 w-4 mr-2" />
+          Exportar
+        </Button>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+        <Card className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border-emerald-500/20">
+          <CardContent className="pt-4">
+            <div className="flex flex-col">
+              <DollarSign className="h-5 w-5 text-emerald-500 mb-2" />
+              <p className="text-xs text-muted-foreground">Total Ventas</p>
+              <p className="text-lg font-bold text-foreground">S/ {totalVentas.toLocaleString()}</p>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/20">
+          <CardContent className="pt-4">
+            <div className="flex flex-col">
+              <DollarSign className="h-5 w-5 text-green-500 mb-2" />
+              <p className="text-xs text-muted-foreground">Contado</p>
+              <p className="text-lg font-bold text-foreground">S/ {ventasContado.toLocaleString()}</p>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border-amber-500/20">
+          <CardContent className="pt-4">
+            <div className="flex flex-col">
+              <DollarSign className="h-5 w-5 text-amber-500 mb-2" />
+              <p className="text-xs text-muted-foreground">Crédito</p>
+              <p className="text-lg font-bold text-foreground">S/ {ventasCredito.toLocaleString()}</p>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
+          <CardContent className="pt-4">
+            <div className="flex flex-col">
+              <DollarSign className="h-5 w-5 text-blue-500 mb-2" />
+              <p className="text-xs text-muted-foreground">Depósito</p>
+              <p className="text-lg font-bold text-foreground">S/ {ventasDeposito.toLocaleString()}</p>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border-purple-500/20">
+          <CardContent className="pt-4">
+            <div className="flex flex-col">
+              <Package className="h-5 w-5 text-purple-500 mb-2" />
+              <p className="text-xs text-muted-foreground">Bonificaciones</p>
+              <p className="text-lg font-bold text-foreground">{totalBonificaciones} uds</p>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="bg-gradient-to-br from-pink-500/10 to-pink-600/5 border-pink-500/20">
+          <CardContent className="pt-4">
+            <div className="flex flex-col">
+              <Package className="h-5 w-5 text-pink-500 mb-2" />
+              <p className="text-xs text-muted-foreground">Degustaciones</p>
+              <p className="text-lg font-bold text-foreground">{totalDegustaciones} uds</p>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="bg-gradient-to-br from-cyan-500/10 to-cyan-600/5 border-cyan-500/20">
+          <CardContent className="pt-4">
+            <div className="flex flex-col">
+              <Users className="h-5 w-5 text-cyan-500 mb-2" />
+              <p className="text-xs text-muted-foreground">Clientes</p>
+              <p className="text-lg font-bold text-foreground">{clientesAtendidos}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filtros */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+            <div className="relative lg:col-span-2">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por cliente o nota de pedido..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            
+            <Select value={filterVendedor} onValueChange={setFilterVendedor}>
+              <SelectTrigger>
+                <SelectValue placeholder="Vendedor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los vendedores</SelectItem>
+                {mockVendedores.map(v => (
+                  <SelectItem key={v.id} value={v.id}>{v.nombre}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            <Select value={filterCondicion} onValueChange={setFilterCondicion}>
+              <SelectTrigger>
+                <SelectValue placeholder="Condición" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las condiciones</SelectItem>
+                <SelectItem value="CONTADO">Contado</SelectItem>
+                <SelectItem value="CREDITO">Crédito</SelectItem>
+                <SelectItem value="DEPOSITO">Depósito</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            <Select value={filterTipoCliente} onValueChange={setFilterTipoCliente}>
+              <SelectTrigger>
+                <SelectValue placeholder="Tipo Cliente" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los tipos</SelectItem>
+                <SelectItem value="DISTRIBUIDOR">Distribuidor (D)</SelectItem>
+                <SelectItem value="MAYORISTA">Mayorista (M)</SelectItem>
+                <SelectItem value="SUPER_MAYORISTA">Super Mayorista (SM)</SelectItem>
+                <SelectItem value="TIENDA">Tienda (T)</SelectItem>
+                <SelectItem value="MINIMARKET">Minimarket (CM)</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="justify-start text-left font-normal">
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {format(dateRange.from, 'dd/MM')} - {format(dateRange.to, 'dd/MM')}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="end">
+                <div className="p-3 space-y-2">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="w-full justify-start"
+                    onClick={() => setDateRange({ from: new Date(), to: new Date() })}
+                  >
+                    Hoy
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="w-full justify-start"
+                    onClick={() => setDateRange({ 
+                      from: startOfWeek(new Date(), { locale: es }), 
+                      to: endOfWeek(new Date(), { locale: es }) 
+                    })}
+                  >
+                    Esta semana
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="w-full justify-start"
+                    onClick={() => setDateRange({ 
+                      from: startOfMonth(new Date()), 
+                      to: endOfMonth(new Date()) 
+                    })}
+                  >
+                    Este mes
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Tabs de reportes */}
+      <Tabs defaultValue="detalle" className="space-y-4">
+        <TabsList className="flex-wrap h-auto">
+          <TabsTrigger value="detalle">Detalle de Ventas</TabsTrigger>
+          <TabsTrigger value="vendedor">Por Vendedor</TabsTrigger>
+          <TabsTrigger value="cliente">Por Cliente</TabsTrigger>
+          <TabsTrigger value="producto">Por Producto</TabsTrigger>
+          <TabsTrigger value="promociones" className="flex items-center gap-1">
+            <Gift className="h-3 w-3" />
+            Promociones/Degustaciones
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="detalle">
+          <Card>
+            <CardContent className="pt-6">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>N° Pedido</TableHead>
+                    <TableHead>Vendedor</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead>Condición</TableHead>
+                    <TableHead className="text-right">Items</TableHead>
+                    <TableHead className="text-right">Bonif.</TableHead>
+                    <TableHead className="text-right">Degust.</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredVentas.map((venta) => (
+                    <TableRow key={venta.id}>
+                      <TableCell>{format(venta.fecha, 'dd/MM/yyyy')}</TableCell>
+                      <TableCell className="font-mono">{venta.notaPedido}</TableCell>
+                      <TableCell>{venta.vendedor}</TableCell>
+                      <TableCell>{venta.cliente}</TableCell>
+                      <TableCell>{getTipoClienteBadge(venta.tipoCliente)}</TableCell>
+                      <TableCell>{getCondicionBadge(venta.condicionVenta)}</TableCell>
+                      <TableCell className="text-right">{venta.items.length}</TableCell>
+                      <TableCell className="text-right">{venta.totalBonificacion}</TableCell>
+                      <TableCell className="text-right">{venta.totalDegustacion}</TableCell>
+                      <TableCell className="text-right font-bold">S/ {venta.total.toLocaleString()}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="sm" onClick={() => setSelectedVenta(venta)}>
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="vendedor">
+          <Card>
+            <CardHeader>
+              <CardTitle>Resumen por Vendedor</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {mockVendedores.map(vendedor => {
+                  const ventasVendedor = filteredVentas.filter(v => v.vehiculoId === vendedor.id);
+                  const totalVendedor = ventasVendedor.reduce((acc, v) => acc + v.total, 0);
+                  const clientesVendedor = new Set(ventasVendedor.map(v => v.clienteId)).size;
+                  
+                  return (
+                    <Card key={vendedor.id} className="bg-muted/30">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center justify-between flex-wrap gap-4">
+                          <div className="flex items-center gap-4">
+                            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                              <Truck className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                              <p className="font-medium">{vendedor.nombre}</p>
+                              <p className="text-sm text-muted-foreground">{vendedor.placa}</p>
+                            </div>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Ventas</p>
+                            <p className="font-bold">{ventasVendedor.length}</p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm text-muted-foreground">Clientes</p>
+                            <p className="font-bold">{clientesVendedor}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm text-muted-foreground">Total</p>
+                            <p className="font-bold text-lg">S/ {totalVendedor.toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="cliente">
+          <Card>
+            <CardHeader>
+              <CardTitle>Resumen por Cliente</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead className="text-right">N° Compras</TableHead>
+                    <TableHead className="text-right">Total Comprado</TableHead>
+                    <TableHead className="text-right">Promedio</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {mockClientes.map(cliente => {
+                    const ventasCliente = filteredVentas.filter(v => v.clienteId === cliente.id);
+                    const totalCliente = ventasCliente.reduce((acc, v) => acc + v.total, 0);
+                    const promedio = ventasCliente.length > 0 ? totalCliente / ventasCliente.length : 0;
+                    
+                    return (
+                      <TableRow key={cliente.id}>
+                        <TableCell className="font-medium">{cliente.nombre}</TableCell>
+                        <TableCell>{getTipoClienteBadge(cliente.tipo)}</TableCell>
+                        <TableCell className="text-right">{ventasCliente.length}</TableCell>
+                        <TableCell className="text-right font-bold">S/ {totalCliente.toLocaleString()}</TableCell>
+                        <TableCell className="text-right">S/ {promedio.toFixed(2)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="producto">
+          <Card>
+            <CardHeader>
+              <CardTitle>Resumen por Producto</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Producto</TableHead>
+                    <TableHead className="text-right">Cantidad Vendida</TableHead>
+                    <TableHead className="text-right">Bonificaciones</TableHead>
+                    <TableHead className="text-right">Degustaciones</TableHead>
+                    <TableHead className="text-right">Total Ventas</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(() => {
+                    const productosMap = new Map<string, { cantidad: number; bonif: number; degust: number; total: number }>();
+                    filteredVentas.forEach(v => {
+                      v.items.forEach(item => {
+                        const existing = productosMap.get(item.presentacion) || { cantidad: 0, bonif: 0, degust: 0, total: 0 };
+                        productosMap.set(item.presentacion, {
+                          cantidad: existing.cantidad + item.cantidad,
+                          bonif: existing.bonif + item.bonificacion,
+                          degust: existing.degust + item.degustacion,
+                          total: existing.total + item.total,
+                        });
+                      });
+                    });
+                    
+                    return Array.from(productosMap.entries()).map(([producto, data]) => (
+                      <TableRow key={producto}>
+                        <TableCell className="font-medium">{producto}</TableCell>
+                        <TableCell className="text-right">{data.cantidad}</TableCell>
+                        <TableCell className="text-right">{data.bonif}</TableCell>
+                        <TableCell className="text-right">{data.degust}</TableCell>
+                        <TableCell className="text-right font-bold">S/ {data.total.toLocaleString()}</TableCell>
+                      </TableRow>
+                    ));
+                  })()}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Nueva pestaña de Promociones/Degustaciones */}
+        <TabsContent value="promociones">
+          <div className="space-y-4">
+            {/* KPIs de Promociones */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="bg-gradient-to-br from-pink-500/10 to-pink-600/5 border-pink-500/20">
+                <CardContent className="pt-4">
+                  <div className="flex flex-col">
+                    <Gift className="h-5 w-5 text-pink-500 mb-2" />
+                    <p className="text-xs text-muted-foreground">Total Degustaciones</p>
+                    <p className="text-lg font-bold text-foreground">
+                      {mockPromocionesDegustaciones.filter(p => p.tipo === 'DEGUSTACION').reduce((acc, p) => acc + p.cantidad, 0)} uds
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+              
+              <Card className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border-purple-500/20">
+                <CardContent className="pt-4">
+                  <div className="flex flex-col">
+                    <Package className="h-5 w-5 text-purple-500 mb-2" />
+                    <p className="text-xs text-muted-foreground">Total Promociones</p>
+                    <p className="text-lg font-bold text-foreground">
+                      {mockPromocionesDegustaciones.filter(p => p.tipo === 'PROMOCION').reduce((acc, p) => acc + p.cantidad, 0)} uds
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+              
+              <Card className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border-amber-500/20">
+                <CardContent className="pt-4">
+                  <div className="flex flex-col">
+                    <DollarSign className="h-5 w-5 text-amber-500 mb-2" />
+                    <p className="text-xs text-muted-foreground">Valor Estimado Total</p>
+                    <p className="text-lg font-bold text-foreground">
+                      S/ {mockPromocionesDegustaciones.reduce((acc, p) => acc + p.valorEstimado, 0).toFixed(2)}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+              
+              <Card className="bg-gradient-to-br from-cyan-500/10 to-cyan-600/5 border-cyan-500/20">
+                <CardContent className="pt-4">
+                  <div className="flex flex-col">
+                    <Users className="h-5 w-5 text-cyan-500 mb-2" />
+                    <p className="text-xs text-muted-foreground">Clientes Beneficiados</p>
+                    <p className="text-lg font-bold text-foreground">
+                      {new Set(mockPromocionesDegustaciones.map(p => p.clienteId)).size}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Tabla de Promociones/Degustaciones */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Gift className="h-5 w-5 text-primary" />
+                  Detalle de Promociones y Degustaciones
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Fecha</TableHead>
+                      <TableHead>Ruta / Día</TableHead>
+                      <TableHead>Vendedor</TableHead>
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Tipo Cliente</TableHead>
+                      <TableHead>Producto</TableHead>
+                      <TableHead>Tipo</TableHead>
+                      <TableHead className="text-right">Cantidad</TableHead>
+                      <TableHead className="text-right">Valor Est.</TableHead>
+                      <TableHead>Motivo</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {mockPromocionesDegustaciones.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell>{format(item.fecha, 'dd/MM/yyyy')}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <MapPin className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-sm">{item.ruta}</span>
+                            <Badge variant="outline" className="ml-1 text-xs">Día {item.diaRuta}</Badge>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{item.vendedor}</p>
+                            <p className="text-xs text-muted-foreground">{item.vehiculoPlaca}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium">{item.cliente}</TableCell>
+                        <TableCell>{getTipoClienteBadge(item.tipoCliente)}</TableCell>
+                        <TableCell>{item.producto}</TableCell>
+                        <TableCell>
+                          <Badge className={item.tipo === 'DEGUSTACION' 
+                            ? 'bg-pink-500/10 text-pink-500 border-pink-500/30' 
+                            : 'bg-purple-500/10 text-purple-500 border-purple-500/30'
+                          }>
+                            {item.tipo === 'DEGUSTACION' ? 'Degustación' : 'Promoción'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-bold">{item.cantidad}</TableCell>
+                        <TableCell className="text-right">S/ {item.valorEstimado.toFixed(2)}</TableCell>
+                        <TableCell className="max-w-[200px]">
+                          <span className="text-sm text-muted-foreground">{item.motivo}</span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            {/* Resumen por Vendedor/Ruta */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Por Vendedor</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {mockVendedores.map(vendedor => {
+                      const promocionesVendedor = mockPromocionesDegustaciones.filter(p => p.vendedor === vendedor.nombre);
+                      const totalUnidades = promocionesVendedor.reduce((acc, p) => acc + p.cantidad, 0);
+                      const totalValor = promocionesVendedor.reduce((acc, p) => acc + p.valorEstimado, 0);
+                      
+                      if (promocionesVendedor.length === 0) return null;
+                      
+                      return (
+                        <div key={vendedor.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                              <Truck className="h-4 w-4 text-primary" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-sm">{vendedor.nombre}</p>
+                              <p className="text-xs text-muted-foreground">{vendedor.placa}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-bold">{totalUnidades} uds</p>
+                            <p className="text-xs text-muted-foreground">S/ {totalValor.toFixed(2)}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Por Tipo de Cliente</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {['DISTRIBUIDOR', 'MAYORISTA', 'SUPER_MAYORISTA', 'TIENDA', 'MINIMARKET'].map(tipo => {
+                      const promocionesTipo = mockPromocionesDegustaciones.filter(p => p.tipoCliente === tipo);
+                      const totalUnidades = promocionesTipo.reduce((acc, p) => acc + p.cantidad, 0);
+                      const totalValor = promocionesTipo.reduce((acc, p) => acc + p.valorEstimado, 0);
+                      
+                      if (promocionesTipo.length === 0) return null;
+                      
+                      return (
+                        <div key={tipo} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            {getTipoClienteBadge(tipo)}
+                            <span className="text-sm font-medium">{promocionesTipo.length} entregas</span>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-bold">{totalUnidades} uds</p>
+                            <p className="text-xs text-muted-foreground">S/ {totalValor.toFixed(2)}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* Modal de detalle */}
+      <Dialog open={!!selectedVenta} onOpenChange={() => setSelectedVenta(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Detalle de Venta - {selectedVenta?.notaPedido}</DialogTitle>
+          </DialogHeader>
+          
+          {selectedVenta && (
+            <div className="space-y-6 py-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Fecha</p>
+                  <p className="font-medium">{format(selectedVenta.fecha, 'PPP', { locale: es })}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Cliente</p>
+                  <p className="font-medium">{selectedVenta.cliente}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Vendedor</p>
+                  <p className="font-medium">{selectedVenta.vendedor}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Condición</p>
+                  {getCondicionBadge(selectedVenta.condicionVenta)}
+                </div>
+              </div>
+
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Presentación</TableHead>
+                    <TableHead className="text-right">Cantidad</TableHead>
+                    <TableHead className="text-right">Precio</TableHead>
+                    <TableHead className="text-right">Bonif.</TableHead>
+                    <TableHead className="text-right">Degust.</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedVenta.items.map((item, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell>{item.presentacion}</TableCell>
+                      <TableCell className="text-right">{item.cantidad}</TableCell>
+                      <TableCell className="text-right">S/ {item.precio.toFixed(2)}</TableCell>
+                      <TableCell className="text-right">{item.bonificacion}</TableCell>
+                      <TableCell className="text-right">{item.degustacion}</TableCell>
+                      <TableCell className="text-right font-bold">S/ {item.total.toFixed(2)}</TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="bg-muted/50">
+                    <TableCell colSpan={5} className="text-right font-bold">Total:</TableCell>
+                    <TableCell className="text-right font-bold text-lg">S/ {selectedVenta.total.toLocaleString()}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+export default SalesDetailPage;

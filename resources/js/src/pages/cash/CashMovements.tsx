@@ -1,0 +1,234 @@
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { 
+  Search, 
+  ArrowDownCircle, 
+  ArrowUpCircle, 
+  Filter,
+  Calendar,
+  Wallet,
+  FileText,
+} from 'lucide-react';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
+
+// Mock cash movements data
+const mockCashMovements = [
+  { id: '1', type: 'INGRESO', category: 'Venta', amount: 135.00, description: 'Venta #001234', createdAt: new Date('2024-12-13T09:30:00'), user: 'Juan Pérez' },
+  { id: '2', type: 'INGRESO', category: 'Cobranza', amount: 250.00, description: 'Pago Bodega Don Pedro', createdAt: new Date('2024-12-13T10:15:00'), user: 'Juan Pérez' },
+  { id: '3', type: 'EGRESO', category: 'Gasto', amount: 50.00, description: 'Combustible unidad V-001', createdAt: new Date('2024-12-13T11:00:00'), user: 'Juan Pérez' },
+  { id: '4', type: 'INGRESO', category: 'Venta', amount: 85.00, description: 'Venta #001235', createdAt: new Date('2024-12-13T11:30:00'), user: 'Ana García' },
+  { id: '5', type: 'EGRESO', category: 'Devolución', amount: 30.00, description: 'Devolución cliente - productos dañados', createdAt: new Date('2024-12-13T12:00:00'), user: 'Juan Pérez' },
+  { id: '6', type: 'INGRESO', category: 'Venta', amount: 420.00, description: 'Venta #001236', createdAt: new Date('2024-12-13T14:30:00'), user: 'Ana García' },
+  { id: '7', type: 'INGRESO', category: 'Cobranza', amount: 550.00, description: 'Pago Minimarket El Sol', createdAt: new Date('2024-12-13T15:00:00'), user: 'Juan Pérez' },
+  { id: '8', type: 'EGRESO', category: 'Gasto', amount: 120.00, description: 'Mantenimiento vehículo', createdAt: new Date('2024-12-13T16:30:00'), user: 'Juan Pérez' },
+];
+
+const CashMovements = () => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+
+  const filteredMovements = mockCashMovements.filter((movement) => {
+    const matchesSearch = movement.description
+      .toLowerCase()
+      .includes(searchTerm.toLowerCase());
+    const matchesType = typeFilter === 'all' || movement.type === typeFilter;
+    const matchesCategory = categoryFilter === 'all' || movement.category === categoryFilter;
+    return matchesSearch && matchesType && matchesCategory;
+  });
+
+  const totalIngresos = mockCashMovements
+    .filter(m => m.type === 'INGRESO')
+    .reduce((acc, m) => acc + m.amount, 0);
+
+  const totalEgresos = mockCashMovements
+    .filter(m => m.type === 'EGRESO')
+    .reduce((acc, m) => acc + m.amount, 0);
+
+  const categories = [...new Set(mockCashMovements.map(m => m.category))];
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-display font-bold text-foreground">
+            Movimientos de Caja
+          </h1>
+          <p className="text-muted-foreground">
+            Historial de ingresos y egresos
+          </p>
+        </div>
+        <Button variant="outline">
+          <FileText className="h-4 w-4 mr-2" />
+          Exportar
+        </Button>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="shadow-card">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                <ArrowDownCircle className="h-6 w-6 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Total Ingresos</p>
+                <p className="text-2xl font-bold text-emerald-600">
+                  S/ {totalIngresos.toLocaleString()}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                <ArrowUpCircle className="h-6 w-6 text-red-600" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Total Egresos</p>
+                <p className="text-2xl font-bold text-red-600">
+                  S/ {totalEgresos.toLocaleString()}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-card">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Wallet className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Balance</p>
+                <p className={`text-2xl font-bold ${totalIngresos - totalEgresos >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  S/ {(totalIngresos - totalEgresos).toLocaleString()}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <Card className="shadow-card">
+        <CardContent className="pt-6">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar movimiento..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <SelectTrigger className="w-full sm:w-40">
+                <Filter className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="INGRESO">Ingresos</SelectItem>
+                <SelectItem value="EGRESO">Egresos</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-full sm:w-40">
+                <SelectValue placeholder="Categoría" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas</SelectItem>
+                {categories.map((cat) => (
+                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Movements Table */}
+      <Card className="shadow-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Calendar className="h-5 w-5 text-primary" />
+            Historial de Movimientos
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Fecha / Hora</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead>Categoría</TableHead>
+                <TableHead>Descripción</TableHead>
+                <TableHead>Usuario</TableHead>
+                <TableHead className="text-right">Monto</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredMovements.map((movement) => (
+                <TableRow key={movement.id} className="hover:bg-muted/50">
+                  <TableCell className="text-muted-foreground">
+                    {format(movement.createdAt, "dd MMM yyyy, HH:mm", { locale: es })}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      {movement.type === 'INGRESO' 
+                        ? <ArrowDownCircle className="h-4 w-4 text-emerald-500" />
+                        : <ArrowUpCircle className="h-4 w-4 text-red-500" />
+                      }
+                      <Badge variant={movement.type === 'INGRESO' ? 'default' : 'destructive'}>
+                        {movement.type === 'INGRESO' ? 'Ingreso' : 'Egreso'}
+                      </Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{movement.category}</Badge>
+                  </TableCell>
+                  <TableCell className="font-medium">{movement.description}</TableCell>
+                  <TableCell className="text-muted-foreground">{movement.user}</TableCell>
+                  <TableCell className={`text-right font-bold ${
+                    movement.type === 'INGRESO' ? 'text-emerald-600' : 'text-red-600'
+                  }`}>
+                    {movement.type === 'INGRESO' ? '+' : '-'} S/ {movement.amount.toFixed(2)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default CashMovements;
